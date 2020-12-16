@@ -1,0 +1,816 @@
+---
+title: "Lectures 5 - 6"
+author: "Juan Carlos Villaseñor-Derbez"
+date: "12/15/2020"
+output:
+  github_document:
+    pandoc_args: --webtex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 3, fig.height = 3)
+
+suppressPackageStartupMessages({
+  library(brms)
+  library(ggdag)
+  library(tidybayes)
+  library(tidyverse)
+  library(magrittr)
+})
+
+data(WaffleDivorce, package = "rethinking")
+
+d <- WaffleDivorce %>% 
+  mutate(d = rethinking::standardize(Divorce),
+         m = rethinking::standardize(Marriage),
+         a = rethinking::standardize(MedianAgeMarriage))
+```
+
+# Spurious associations
+
+## Visualize data
+
+```{r}
+ggplot(data = d, mapping = aes(x = a, y = d)) +
+  geom_point() +
+  labs(x = "Standardized age-at-marriage",
+       y = "Standardized divorce rate") +
+  theme_bw()
+```
+
+## Model 1
+
+### Define a model
+
+We are interested in modeling divorce rates as dependent variables of marriage rates and median age of marriage. But first, we'll test for the relationship between divorce rate and age of marriage, a know causal path.
+
+$$
+d_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta_1 a_i \\
+\alpha \sim \text{Normal}(0, 0.2)\\
+\beta_1 \sim \text{Normal}(0, 0.5) \\
+\sigma \sim \text{Exponential}(1)
+$$
+
+### Sample from the priors
+
+```{r}
+n_lines <- 50
+
+tibble(n = 1:n_lines,
+       Intercept = rnorm(n = n_lines, mean = 0, sd = 0.2),
+       b = rnorm(n = n_lines, mean = 0, sd = 0.5)) %>%
+  expand(nesting(n, Intercept, b), age = c(-2, 2)) %>%
+  mutate(divorce = Intercept + b * age) %>% 
+  ggplot(aes(x = age, y = divorce, group = n)) +
+  geom_line() +
+  labs(x = "Standardized age-at-marriage",
+       y = "Standardized divorce rate",
+       title = "b ~ dnorm(0, 0.5); a ~ dnorm(0, 0.2)") +
+  theme_bw()
+```
+
+### Fit the model
+
+```{r}
+model <- brm(formula = d ~ 1 + a,
+             data = d,
+             family = gaussian,
+             prior = c(prior(normal(0, 0.2), class = Intercept),
+                       prior(normal(0, 0.5), class = b),
+                       prior(exponential(1), class = sigma)),
+             seed = 5,
+             chains = 4,
+             cores = 4)
+```
+
+### Inspect the fit
+
+```{r}
+model
+```
+
+### Visualize the fit
+
+```{r}
+new_data <- tibble(a = seq(from = 1.05 * min(d$a), to = 1.05 * max(d$a), length.out = 30))
+
+trend_line <- fitted(model, newdata = new_data) %>% 
+  data.frame() %>% 
+  bind_cols(new_data)
+
+values <- predict(model, newdata = new_data) %>% 
+  data.frame() %>% 
+  bind_cols(new_data)
+
+ggplot(mapping = aes(x = a)) +
+  geom_ribbon(data = values,
+              aes(ymin = Q2.5, ymax = Q97.5),
+              alpha = 0.5) +
+  geom_smooth(data = trend_line,
+              mapping = aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              fill = "red",
+              alpha = 0.5,
+              color = "black") +
+  geom_point(data = d,
+             mapping = aes(y = d)) +
+  labs(x = "Standardized age-at-marriage",
+       y = "Standardized divorce rate",
+       title = "Divorce rate vs. Age-at-marriage") +
+  theme_bw()
+```
+
+## Model 2
+
+### Define a model
+
+In this case, marriage rate is the variable of interest
+
+$$
+d_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta_1 m_i \\
+\alpha \sim \text{Normal}(0, 0.2)\\
+\beta_1 \sim \text{Normal}(0, 0.5) \\
+\sigma \sim \text{Exponential}(1)
+$$
+
+### Sample from the priors
+
+```{r}
+n_lines <- 50
+
+tibble(n = 1:n_lines,
+       Intercept = rnorm(n = n_lines, mean = 0, sd = 0.2),
+       b = rnorm(n = n_lines, mean = 0, sd = 0.5)) %>%
+  expand(nesting(n, Intercept, b), marriage = c(-2, 2)) %>%
+  mutate(divorce = Intercept + b * marriage) %>% 
+  ggplot(aes(x = marriage, y = divorce, group = n)) +
+  geom_line() +
+  labs(x = "Standardized age-at-marriage",
+       y = "Standardized divorce rate",
+       title = "b ~ dnorm(0, 0.5); a ~ dnorm(0, 0.2)") +
+  theme_bw()
+```
+
+### Fit the model
+
+```{r}
+model2 <- brm(formula = d ~ 1 + m,
+              data = d,
+              family = gaussian,
+              prior = c(prior(normal(0, 0.2), class = Intercept),
+                        prior(normal(0, 0.5), class = b),
+                        prior(exponential(1), class = sigma)),
+              seed = 5,
+              chains = 4,
+              cores = 4)
+```
+
+### Inspect the fit
+
+```{r}
+model2
+```
+
+### Visualize the fit
+
+```{r}
+new_data <- tibble(m = seq(from = 1.05 * min(d$a), to = 1.05 * max(d$a), length.out = 30))
+
+trend_line <- fitted(model2, newdata = new_data) %>% 
+  data.frame() %>% 
+  bind_cols(new_data)
+
+values <- predict(model2, newdata = new_data) %>% 
+  data.frame() %>% 
+  bind_cols(new_data)
+
+ggplot(mapping = aes(x = m)) +
+  geom_ribbon(data = values,
+              aes(ymin = Q2.5, ymax = Q97.5),
+              alpha = 0.5) +
+  geom_smooth(data = trend_line,
+              mapping = aes(y = Estimate, ymin = Q2.5, ymax = Q97.5),
+              stat = "identity",
+              fill = "red",
+              alpha = 0.5,
+              color = "black") +
+  geom_point(data = d,
+             mapping = aes(y = d)) +
+  labs(x = "Standardized marriage-rate",
+       y = "Standardized divorce rate",
+       title = "b ~ dnorm(0, 0.5); a ~ dnorm(0, 0.2)") +
+  theme_bw()
+  
+```
+
+
+### Directed Acyclic Graphs of a multivariate model
+
+```{r}
+dagify(M ~ A,
+       D ~ A + M) %>%
+  ggdag(layout = "circle") +
+  theme_void()
+```
+
+### Inspect the correlation structure
+
+```{r}
+d %>% 
+  select(d:a) %>% 
+  cor()
+```
+
+### Define a multivariate model to fit
+
+$$
+d_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta_1 m_i + \beta_2 a_i\\
+\alpha \sim \text{Normal}(0, 0.2)\\
+\beta_1 \sim \text{Normal}(0, 0.5) \\
+\beta_2 \sim \text{Normal}(0, 0.5) \\
+\sigma \sim \text{Exponential}(1)
+$$
+
+```{r}
+multivariate_model <- 
+  brm(
+    formula = d ~ 1 + m + a,
+    data = d,
+    family = gaussian,
+    prior = c(prior(normal(0, 0.2), class = Intercept),
+              prior(normal(0, 0.5), class = b),
+              prior(exponential(1), class = sigma)),
+    seed = 5)
+
+```
+
+### Inspect model fit
+
+```{r}
+multivariate_model
+```
+
+### Visualize model fit
+
+```{r}
+coeftab <- function(model, model_name){
+  posterior_samples(x = model) %>% 
+  select(-lp__, -contains("prior")) %>% 
+  pivot_longer(cols = everything(), names_to = "variable") %>% 
+  mutate(model = model_name)
+}
+
+
+
+tibble(model = list(model, model2, multivariate_model),
+       model_name = c(1, 2, 3)) %$% 
+  map2_dfr(model, model_name, coeftab) %>% 
+  filter(variable %in% c("b_a", "b_m")) %>% 
+  ggplot(aes(x = model, y = value)) +
+  stat_summary(geom = "pointinterval", fun.data = point_interval) +
+  facet_wrap(~variable, ncol = 1) +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed")
+
+
+```
+
+## Plotting multivariate posteriors
+
+### Predictor residual plots
+
+#### M of A
+
+##### Fit the model
+
+Let's predict one predictor with another. In this case, m as a function of a.
+
+```{r}
+m_of_a <- brm(
+  formula = m ~ 1 + a,
+  data = d,
+  family = gaussian,
+  prior = c(prior(normal(0, 0.2), class = Intercept),
+            prior(normal(0, 0.5), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5)
+```
+
+##### Inspect the model
+
+```{r}
+m_of_a
+```
+
+##### Visualize model fit and residuals
+
+```{r}
+f <- fitted(m_of_a) %>% 
+  data.frame() %>% 
+  bind_cols(d)
+
+ggplot(data = f,
+       mapping = aes(x = a)) +
+  geom_line(aes(y = Estimate),
+            linetype = "dashed") +
+  geom_linerange(aes(ymin = m, ymax = Estimate),
+                 size = 0.25) +
+  geom_point(aes(y = m)) +
+  theme_bw() +
+  labs(x = "age-at-marriage (std)", y = "marriage rate (std)")
+```
+
+##### Visualize main outcome variable vs. residuals
+
+Once we account for the portion of m explained by m, what's left are the residuals. What part of these explains our main outcome variable?
+
+```{r}
+r <- residuals(m_of_a) %>% 
+  as_tibble() %>% 
+  bind_cols(d)
+
+ggplot(data = r,
+       mapping = aes(x = Estimate, y = d)) +
+  geom_smooth(method = "lm", formula = y ~ x,
+              size = 0.25, color = "black") +
+  geom_point() +
+  theme_bw() +
+  labs(x = "Marriage rate residuals",
+       y = "divorce rate (std)")
+```
+
+#### A of M
+
+##### Fit the model
+
+```{r}
+a_of_m <- brm(
+  formula = a ~ 1 + m,
+  data = d,
+  family = gaussian,
+  prior = c(prior(normal(0, 0.2), class = Intercept),
+            prior(normal(0, 0.5), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5
+)
+```
+
+##### Inspect the model
+
+```{r}
+a_of_m
+```
+
+#### Visualize model fit and residuals
+
+```{r}
+f <- fitted(a_of_m) %>% 
+  data.frame() %>% 
+  bind_cols(d)
+
+ggplot(data = f,
+       mapping = aes(x = m)) +
+  geom_linerange(aes(ymin = Estimate, ymax = a),
+                 size = 0.25) +
+  geom_line(aes(y = Estimate)) +
+  geom_point(aes(y = a)) +
+  theme_bw() +
+  labs(x = "marriage rate (std)",
+       y = "age-at-marriage (std)")
+```
+
+##### Visualize main outcome vs residuals
+
+This shows us how the portion of a not explained by m predicts d.
+
+```{r}
+r <- residuals(a_of_m) %>% 
+  data.frame() %>% 
+  bind_cols(d)
+
+ggplot(data = r,
+       mapping = aes(x = Estimate, y = d)) +
+  geom_smooth(method = "lm", formula = y ~ x,
+              color = "black") +
+  geom_point() +
+  theme_bw() +
+  labs(x = "age-at-marriage residuals",
+       y = "divorce rate (std)")
+```
+
+### Posterior prediction plots
+
+Lets create a basic observed vs. predicted plot, but carry on with the uncertainty
+
+```{r}
+fitted(multivariate_model) %>% 
+  data.frame() %>% 
+  mutate_all(~ . * sd(d$Divorce) + mean(d$Divorce)) %>% 
+  bind_cols(d) %>% 
+  ggplot(aes(x = Divorce, y = Estimate)) +
+  geom_abline(linetype = "dashed") +
+  geom_pointrange(aes(ymin = Q2.5, ymax = Q97.5), shape = 21) +
+  labs(x = "Observed divorce rate",
+       y = "Predicted divorce rate") +
+  theme_bw()
+```
+
+
+### Counterfactual plots
+
+```{r}
+new_data <- tibble(a = 0,
+                   m = seq(from = -3, to = 3, length.out = 30)) 
+
+mean_mu <- fitted(multivariate_model, newdata = new_data) %>% 
+  data.frame() %>% 
+  mutate_all(~ . * sd(d$Divorce) + mean(d$Divorce)) %>% 
+  bind_cols(new_data)
+
+pi_mu <- predict(multivariate_model, newdata = new_data) %>% 
+  data.frame() %>% 
+  mutate_all(~ . * sd(d$Divorce) + mean(d$Divorce)) %>% 
+  bind_cols(new_data)
+
+
+ggplot(mapping = aes(x = m)) +
+  geom_ribbon(data = pi_mu, aes(ymin = Q2.5, ymax = Q97.5), alpha = 0.5) +
+  geom_smooth(data = mean_mu,
+              aes(y = Estimate, ymin = Q2.5, ymax = Q97.5), 
+              stat = "identity", 
+              color = "black",
+              size = 0.5,
+              fill = "red") +
+  theme_bw() +
+  labs(title = "a = 0")
+
+```
+
+
+```{r}
+new_data <- tibble(a = seq(from = -3, to = 3.5, length.out = 30),
+                   m = 0) 
+
+mean_mu <- fitted(multivariate_model, newdata = new_data) %>% 
+  data.frame() %>% 
+  mutate_all(~ . * sd(d$Divorce) + mean(d$Divorce)) %>% 
+  bind_cols(new_data)
+
+pi_mu <- predict(multivariate_model, newdata = new_data) %>% 
+  data.frame() %>% 
+  mutate_all(~ . * sd(d$Divorce) + mean(d$Divorce)) %>% 
+  bind_cols(new_data)
+
+
+ggplot(mapping = aes(x = a)) +
+  geom_ribbon(data = pi_mu, aes(ymin = Q2.5, ymax = Q97.5), alpha = 0.5) +
+  geom_smooth(data = mean_mu,
+              aes(y = Estimate, ymin = Q2.5, ymax = Q97.5), 
+              stat = "identity", 
+              color = "black",
+              size = 0.5,
+              fill = "red") +
+  theme_bw() +
+  labs(title = "m = 0")
+```
+
+# Masked relationship
+
+Load and standardize some data 
+
+```{r}
+data(milk, package = "rethinking")
+d <- milk %>% 
+  mutate(K = rethinking::standardize(kcal.per.g),
+         log_mass = log(mass),
+         M = rethinking::standardize(log_mass),
+         N = rethinking::standardize(neocortex.perc)) %>% 
+  drop_na(K, M, N)
+```
+
+## Fit bivariate models
+
+We'll fit two bivariate models. One where body mass is the predictor (M), and anotherone qhere Neocortex percent is the predictor (N). Both will predict Kilocalories per gram (K).
+
+The model is thus given by:
+
+$$
+K_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta \text{(N or M)}\\
+\alpha \sim \text{Normal}(0, 0.2) \\
+\beta  \sim \text{Normal}(0, 0.5) \\
+\sigma  \sim \text{Exponential}(1) \\
+$$
+
+Let's run some prior-predictive simulations
+
+```{r}
+n_lines <- 50
+
+tibble(n = 1:n_lines,
+       a = rnorm(n = n_lines, mean = 0, sd = 0.2),
+       b = rnorm(n = n_lines, mean = 0, sd = 0.5)) %>% 
+  expand(nesting(n, a, b), var = c(-2, 2)) %>% 
+  mutate(K = a + b * var) %>% 
+  ggplot(aes(x = var, y = K, group = n)) +
+  geom_line(size = 0.5) +
+  theme_bw()
+```
+
+Now lets go ahead and fit both models
+
+First the body mass one
+
+```{r}
+k_of_m <- brm(
+  formula = K ~ 1 + M,
+  data = d,
+  family = gaussian,
+  prior = c(prior(normal(0, 0.2), class = Intercept),
+            prior(normal(0, 0.5), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5
+)
+
+k_of_n <- update(k_of_m, formula = K ~ 1 + N, newdata = d)
+  
+```
+
+Briefly inspect the posterior estimates
+
+```{r}
+k_of_m
+
+k_of_n
+```
+
+```{r}
+plot(k_of_m)
+
+plot(k_of_n)
+```
+
+
+Let's make the fitted plots, with 50 and 89 CIs
+
+```{r, fig.width = 6}
+probs <- c(0.055, 0.945, 0.25, 0.75)
+
+# Get fits
+f_m <- fitted(k_of_m, probs = probs) %>% 
+  data.frame() %>% 
+  bind_cols(d)
+
+f_n <- fitted(k_of_n, probs = probs) %>% 
+  data.frame() %>% 
+  bind_cols(d)
+
+p_k_m <- ggplot(data = f_m,
+       mapping = aes(x = M)) +
+  geom_ribbon(aes(ymin = Q5.5, ymax = Q94.5),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q25, ymax = Q75),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_line(aes(y = Estimate)) +
+  geom_point(aes(y = K)) +
+  theme_bw() +
+  labs(x = "Log body mass (std)", y = "Kcal per g (std)")
+
+p_k_n <- ggplot(data = f_n,
+       mapping = aes(x = N)) +
+  geom_ribbon(aes(ymin = Q5.5, ymax = Q94.5),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q25, ymax = Q75),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_line(aes(y = Estimate)) +
+  geom_point(aes(y = K)) +
+  theme_bw() +
+  labs(x = "Neocortex percent (std)", y = "Kcal per g (std)")
+
+cowplot::plot_grid(p_k_m, p_k_n)
+```
+
+## Fit multivariate model
+
+The statistical model is given by
+
+$$
+K_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta_1M + \beta_2 N\\
+\alpha \sim \text{Normal}(0, 0.2) \\
+\beta_1  \sim \text{Normal}(0, 0.5) \\
+\beta_2  \sim \text{Normal}(0, 0.5) \\
+\sigma  \sim \text{Exponential}(1) \\
+$$
+
+Let's fit the model
+
+```{r}
+multivariate_model <- brm(
+  formula = K ~ 1 + M + N,
+  data = d,
+  family = gaussian,
+  prior = c(prior(normal(0, 0.2), class = Intercept),
+            prior(normal(0, 0.5), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5
+)
+```
+
+```{r}
+multivariate_model
+
+plot(multivariate_model)
+
+```
+
+## Counterfactual simulation
+
+```{r, fig.width = 6}
+# NEw data
+new_data_m <- tibble(M = seq(from = -3, to = 3, length.out = 30),
+                     N = 0)
+
+new_data_n <- tibble(N = seq(from = -3, to = 3, length.out = 30),
+                      M = 0)
+
+# Trend lines
+f_const_N <- fitted(multivariate_model, newdata = new_data_m, probs = probs) %>% 
+  data.frame() %>% 
+  bind_cols(new_data_m)
+
+f_const_M <- fitted(multivariate_model, newdata = new_data_n, probs = probs) %>% 
+  data.frame() %>% 
+  bind_cols(new_data_n)
+
+# Plots
+count_of_M <- ggplot(f_const_N, aes(x = M, y = Estimate)) +
+  geom_ribbon(aes(ymin = Q5.5, ymax = Q94.5),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q25, ymax = Q75),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_line(aes(y = Estimate)) +
+  theme_bw() +
+  labs(x = "Log body mass (std)", y = "Kcal per g (std)")
+
+count_of_N <- ggplot(f_const_M, aes(x = N, y = Estimate)) +
+  geom_ribbon(aes(ymin = Q5.5, ymax = Q94.5),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_ribbon(aes(ymin = Q25, ymax = Q75),
+              stat = "identity",
+              alpha = 0.5) +
+  geom_line(aes(y = Estimate)) +
+  theme_bw() +
+  labs(x = "Neocortex percent (std)", y = "Kcal per g (std)")
+
+# Plot
+cowplot::plot_grid(count_of_M, count_of_N)
+
+```
+
+
+
+## Compare strength of each variable between models
+
+```{r}
+cowplot::plot_grid(p_k_m, p_k_n, count_of_M, count_of_N)
+```
+
+Consider this DAG, where U directlu causes N and M. N and M then cause K, but have opposing directional effects.
+
+```{r}
+
+dagify(M ~ U,
+       N ~ U,
+       K ~ M + N) %>% 
+  ggdag(seed = 1) + 
+  theme_void()
+       
+```
+This can be simulated like this, where the negative coefficient in M suggests it has a negative effect on K
+
+```{r}
+n <- 100
+
+fake <- tibble(U = rnorm(n),
+               N = rnorm(n, U),
+               M = rnorm(n, U),
+               K = rnorm(n, 3 * N - 2 * M))
+
+pairs(fake)
+```
+
+Re-fit the model on this fake data
+
+```{r}
+fake_multivariate <- update(multivariate_model,
+                            newdata = fake)
+
+fake_k_of_m <- update(fake_multivariate,
+                     formula = K ~ 1 + M)
+
+fake_k_of_n <- update(fake_multivariate,
+                      formula = K ~ 1 + N)
+```
+
+
+```{r}
+list(fake_multivariate, fake_k_of_m, fake_k_of_n) %>% 
+  lapply(fixef)
+
+list(fake_multivariate, fake_k_of_m, fake_k_of_n) %>% 
+  walk(plot)
+```
+
+# Categorical variables
+
+```{r}
+data(Howell1, package = "rethinking")
+d <- Howell1 %>% 
+  mutate(sex = as.factor(ifelse(male == 1, 2, 1)))
+```
+
+What is the difference in height by sex?
+
+$$
+h_i \sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i = \alpha + \beta_1 male_i \\
+\alpha \sim \text{Normal}(178, 20) \\
+\beta_1 \sim \text{Normal}(0, 10) \\
+\sigma \sim \text{Exponential}(1)
+$$
+
+Let's simulate these priors
+
+```{r}
+n_lines <- 1e4
+set.seed(5)
+
+tibble(a = rnorm(n_lines, 178, 20),
+       b = rnorm(n_lines, 0, 10),
+       mu_female = a,
+       mu_male = a + b) %>% 
+  pivot_longer(contains("mu")) %>% 
+  ggplot(aes(x = value, fill = name)) +
+  geom_density(alpha = 0.4) +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal() +
+  theme(legend.justification = c(0, 1),
+        legend.position = c(0, 1)) +
+  labs(x = "Prior predictive distribution of dummy mu's",
+       caption = "Since the mean of males is a + b, it has more uncertainty")
+```
+
+```{r}
+sex_dummy_model <- brm(
+  data = d, 
+  family = gaussian,
+  height ~ 1 + male,
+  prior = c(prior(normal(178, 20), class = Intercept),
+            prior(normal(0, 10), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5)
+
+sex_indicator_dummy <- brm(
+  data = d, 
+  family = gaussian,
+  height ~ 0 + sex,
+  prior = c(prior(normal(178, 20), class = b),
+            prior(exponential(1), class = sigma)),
+  seed = 5)
+```
+
+
+```{r}
+plot(sex_dummy_model)
+
+plot(sex_indicator_dummy)
+```
+
+```{r}
+list(sex_dummy_model, sex_indicator_dummy) %>% 
+  map(fixef)
+```
+
+
+```{r}
+mcmc_plot(sex_dummy_model, pars = "^b_")
+mcmc_plot(sex_indicator_dummy, pars = "^b_")
+```
+
+---
+
+Lecture 6 starts here
+
+
+

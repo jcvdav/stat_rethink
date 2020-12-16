@@ -5,6 +5,7 @@ date: "12/7/2020"
 output:
   github_document:
     pandoc_args: --webtex---
+---
 
 ```{r}
 suppressPackageStartupMessages({
